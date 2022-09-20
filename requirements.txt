@@ -1,0 +1,6 @@
+telebot
+schedule
+requests
+datetime
+pyTelegramBotAPI
+psycopg2

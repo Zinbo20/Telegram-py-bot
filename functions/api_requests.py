@@ -3,9 +3,14 @@ import requests
 import json
 import time
 
-from replit import db
+import datetime
+from datetime import date
 
-chat_id = -671941311
+from functions import db_requests
+
+import os
+
+chat_id = os.getenv('Grupo_id')
 
 comprador_email_lista = []
 assinatura_status_lista = []
@@ -94,7 +99,7 @@ def monetizze():
       break
 
 def res(bot,mensagem,email,user_id,telefone):
-  global bool_confir
+  global bool_confir, bool_update
   global comprador_email_lista,comprador_nome_lista
   global assinatura_status_lista
   global venda_status_lista
@@ -102,25 +107,48 @@ def res(bot,mensagem,email,user_id,telefone):
   global assinatura_status, venda_status, comprador_email
   
   bool_confir = False
+  bool_update = False
   
   monetizze()
   
   for i in range(len(comprador_email_lista)):
     if(email == comprador_email_lista[i] and assinatura_status_lista[i] == "Ativa" or assinatura_status_lista[i] == "Inadimplente" ):
       bool_confir = True
-      
+          
       assinatura_status = assinatura_status_lista[i]
       venda_status = venda_status_lista[i]
       comprador_email = comprador_email_lista[i]
-
+    
       if(forma_pagamento_lista[i] == "Cartão de crédito"):
         forma_pagamento = "Crédito"
       else:
         forma_pagamento = forma_pagamento_lista[i]
-      
-      data_assinatura = data_assinatura_lista[i]
+          
+      data_assinatura = data_assinatura_lista[i].split()[0]
 
-      db[f"Key {comprador_email}"] = f"{comprador_email} {assinatura_status} {venda_status} {forma_pagamento} {data_assinatura} {user_id} {telefone}"
+      matches = db_requests.find_all()
+
+      for i in range(len(matches)):
+        dados = matches[i]
+        if(email == dados[1] and user_id != int(dados[6])):
+          bool_confir = False
+          user_id = dados[6]
+          assinatura_status = dados[2]
+          venda_status = dados[3]
+          comprador_email = dados[1]
+          forma_pagamento = dados[4]
+          data_assinatura = dados[5]
+          telefone = dados[7]
+  
+      for i in range(len(matches)):
+        dados = matches[i]
+        if(email == dados[1]):
+          db_requests.update_user(dados[0],comprador_email,assinatura_status,venda_status,forma_pagamento,data_assinatura,user_id,telefone)
+          bool_update = True
+
+      if(bool_update == False):
+        db_requests.create_user(comprador_email,assinatura_status,venda_status,forma_pagamento,data_assinatura,user_id,telefone)
+        print(f"{comprador_email} Adicionado ao Database.")
 
 
   if bool_confir == True:
@@ -146,19 +174,42 @@ def ver_membros(bot):
   global venda_status_lista, assinatura_status_lista
   global forma_pagamento,data_assinatura
   global chat_id
+
+  print ('Verificação Diaria.')
   
   monetizze()
   email = ""
+  data = ''
 
-  matches = db.prefix("Key")
+  matches = db_requests.find_all()
+
+  for i in range(len(matches)):
+    dados = matches[i]
+    curr_date = dados[5]
+    for y in range(len(curr_date)):
+      if(curr_date[y] == '-'):
+        data += '/'
+      elif curr_date[y] != '0' and y > 1:
+        data += curr_date[y]
+    curr_date_temp = datetime.datetime.strptime(data, "%y/%m/%d")
+    new_date = curr_date_temp + datetime.timedelta(days=26)
+    if new_date == date.today() and dados[4] == "Boleto":
+      Texto = "Sua assinatura irá expirar em 4 Dias. Para evitar isso renova sua assinatura no site Monetizze. https://www.monetizze.com.br/"
+      bot.send_message(int(dados[6]), Texto)
   
   for i in range(len(matches)):
-    email = matches[i].split()[1]
-    value_db = db[f"Key {email}"]
-    print(email)
+    dados = matches[i]
+    email = dados[1]
     for y in range(len(comprador_email_lista)):
       if(email == comprador_email_lista[y] and (assinatura_status_lista[y] == "Cancelada" or assinatura_status_lista[y] == "None")):
-        Texto = "Desculpe. Você foi expulso pois não renovou a sua assinatura. 😔"
-        bot.send_message(value_db.split()[6], Texto)
-        bot.kick_chat_member(chat_id, value_db.split()[6]) 
-        del db[f"Key {email}"]
+        Texto = "Desculpa. Você foi expulso pois não renovou a sua assinatura. 😔"
+        try:
+          bot.send_message(int(dados[6]), Texto)
+          bot.kick_chat_member(chat_id, int(dados[6])) 
+        except Exception as e:
+          print ('Unexpected error on kick_chat_member:', e)
+        try:
+          db_requests.delete_user(dados[0])
+          print(f"{email} Excluido do Database.")
+        except Exception as e:
+          print ('Unexpected error on delete_user:', e)
